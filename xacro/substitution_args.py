@@ -28,8 +28,10 @@ ros_comm/tools/roslaunch/src/roslaunch/substitution_args.py
 import math
 import os
 import sys
+import rospkg
 
 import yaml
+import colcon_core.shell
 
 try:
     from cStringIO import StringIO  # Python 2.x
@@ -173,6 +175,15 @@ def _eval_find(pkg):
     rp = _get_rospack()
     return rp.get_path(pkg)
 
+def get_package_path(pkg):
+    packages = colcon_core.shell.find_installed_packages_in_environment()
+    for installed_pkg, pkg_path in packages.items():
+        if pkg == installed_pkg:
+            print(f"{pkg}, {installed_pkg}, {pkg_path}", file = sys.stderr)
+            share_path = pkg_path / 'share' / pkg
+            return str(share_path) 
+    return None
+
 
 def _find(resolved, a, args, context):
     """
@@ -188,10 +199,12 @@ def _find(resolved, a, args, context):
     :raises: :exc:`rospkg.ResourceNotFound` If PKG requires resource (e.g. package)
     that does not exist
     """
+    print(f"entering find package with args {resolved}, {a}, {args}", file = sys.stderr)
     if len(args) != 1:
         raise SubstitutionException(
             '$(find pkg) command only accepts one argument [%s]' % a)
     before, after = _split_command(resolved, a)
+
     path, after = _separate_first_path(after)
     resolve_without_path = before + ('$(%s)' % a) + after
     path = _sanitize_path(path)
@@ -245,22 +258,14 @@ def _find_executable(resolved, a, args, _context, source_path_to_packages=None):
     # we try to find the specific executable in libexec via catkin
     # which will search in install/devel space
     full_path = None
-    from catkin.find_in_workspaces import find_in_workspaces
-    paths = find_in_workspaces(
-        ['libexec'], project=args[0], first_matching_workspace_only=True,
-        # implicitly first_match_only=True
-        source_path_to_packages=source_path_to_packages)
-    if paths:
-        full_path = _get_executable_path(paths[0], os.path.basename(path))
-    if not full_path:
-        # else we will look for the executable in the source folder of the
-        # package
-        rp = _get_rospack()
-        full_path = _get_executable_path(rp.get_path(args[0]), path)
-    if not full_path:
+
+    paths = get_package_path(args[0])
+
+    print(f"working with {paths}", file = sys.stderr)
+    if not paths:
         raise SubstitutionException('$(find-executable pkg path) '
                                     'could not find executable [%s]' % a)
-    return before + full_path + after
+    return paths 
 
 
 def _find_resource(resolved, a, args, _context, source_path_to_packages=None):
@@ -281,22 +286,24 @@ def _find_resource(resolved, a, args, _context, source_path_to_packages=None):
     # we try to find the specific path in share via catkin
     # which will search in install/devel space and the source folder of the
     # package
-    from catkin.find_in_workspaces import find_in_workspaces
-    paths = find_in_workspaces(
-        ['share'], project=args[0], path=path, first_matching_workspace_only=True,
-        first_match_only=True, source_path_to_packages=source_path_to_packages)
+    paths = get_package_path(path) 
+    print(f"working with {paths}", file = sys.stderr)
     if not paths:
         raise SubstitutionException(
             '$(find-resource pkg path) could not find path [%s]' % a)
-    return before + paths[0] + after
+    return paths 
 
 
 def _split_command(resolved, command_with_args):
 
-    cmd = '$(%s)' % command_with_args
-    idx1 = resolved.find(cmd)
-    idx2 = idx1 + len(cmd)
-    return resolved[0:idx1], resolved[idx2:]
+    #cmd = '$(%s)' % command_with_args
+    #idx1 = resolved.find(cmd)
+    #idx2 = idx1 + len(cmd)
+    segments = command_with_args.split(' ')
+    args = "" 
+    for i in range(1, len(segments)):
+        args = args + segments[i] + ' '
+    return segments[0], args 
 
 
 def _separate_first_path(value):
@@ -327,10 +334,8 @@ def _get_executable_path(base_path, path):
 def _get_rospack():
 
     global _rospack
-    """
     if _rospack is None:
         _rospack = rospkg.RosPack()
-    """
     return _rospack
 
 
